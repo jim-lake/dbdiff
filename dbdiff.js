@@ -165,12 +165,20 @@ class DbDiff {
     table2.constraints.forEach((constraint2) => {
       var constraint1 = table1 && table1.constraints.find((cons) => constraint2.name === cons.name)
       if (constraint1) {
-        if (_.isEqual(constraint1, constraint2)) return
         if (this._dialect === 'postgres') {
-          this._safe(`ALTER TABLE ${tableName} DROP CONSTRAINT ${this._quote(constraint2.name)};`)
+          if (_.isEqual(constraint1, constraint2)) {
+            return
+          } else {
+            this._safe(`ALTER TABLE ${tableName} DROP CONSTRAINT ${this._quote(constraint2.name)};`)
+          }
         } else {
-          this._safe(`ALTER TABLE ${tableName} DROP INDEX ${this._quote(constraint2.name)};`)
+          if (_isMysqlConstraintEqual(constraint1, constraint2)) {
+            return
+          } else {
+            this._safe(`ALTER TABLE ${tableName} DROP FOREIGN KEY ${this._quote(constraint2.name)};`)
+          }
         }
+
         constraint1 = null
       }
       if (!constraint1) {
@@ -178,8 +186,11 @@ class DbDiff {
         var func = (table1 ? this._warn : this._safe).bind(this)
         var fullName = this._quote(constraint2.name)
         if (constraint2.type === 'primary') {
-          if (this._dialect === 'mysql') fullName = 'foo'
-          func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} PRIMARY KEY (${keys});`)
+          if (this._dialect === 'mysql') {
+            func(`ALTER TABLE ${tableName} ADD PRIMARY KEY (${keys});`)
+          } else {
+            func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} PRIMARY KEY (${keys});`)
+          }
         } else if (constraint2.type === 'unique') {
           func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} UNIQUE (${keys});`)
         } else if (constraint2.type === 'foreign') {
@@ -309,6 +320,25 @@ class DbDiff {
         : sql.sql
     }).join('\n\n')
   }
+}
+
+function _isMysqlConstraintEqual(c1,c2) {
+  if (c1.type === 'foreign' && c2.type === 'foreign') {
+    const s1 = _clone(c1);
+    const s2 = _clone(c2);
+
+    s1.columns.sort();
+    s1.referenced_columns.sort();
+    s2.columns.sort();
+    s2.referenced_columns.sort();
+    return _.isEqual(s1,s2);
+  } else {
+    return _.isEqual(c1,c2);
+  }
+}
+
+function _clone(obj) {
+  return JSON.parse(JSON.stringify(obj));
 }
 
 module.exports = DbDiff
