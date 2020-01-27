@@ -22,15 +22,22 @@ class MySQLDialect {
             constraints: [],
             indexes: []
           }
-          return client.find(`DESCRIBE ${this._quote(table)}`)
+          return client.find('SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION ASC',[client.database,table])
             .then((columns) => {
-              t.columns = columns.map((column) => ({
-                name: column.Field,
-                nullable: column.Null === 'YES',
-                default_value: column.Default,
-                type: column.Type,
-                extra: column.Extra
-              }))
+              t.columns = columns.map((column) => {
+                let extra = column.EXTRA
+                if (extra) {
+                  extra = extra.replace("DEFAULT_GENERATED","").trim()
+                }
+                return {
+                  name: column.COLUMN_NAME,
+                  nullable: column.IS_NULLABLE == 'YES',
+                  default_value: column.COLUMN_DEFAULT,
+                  type: column.COLUMN_TYPE,
+                  extra,
+                  collation_name: column.COLLATION_NAME,
+                }
+              })
               return t
             })
         })
@@ -80,7 +87,23 @@ class MySQLDialect {
             })
         ))
       })
-      .then(() => schema)
+      .then(() => {
+        return client.find('SELECT * FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=?', [client.database])
+      })
+      .then((constraints) => {
+        constraints.forEach((constraint) => {
+          const { CONSTRAINT_NAME, UPDATE_RULE, DELETE_RULE, TABLE_NAME } = constraint
+          const table = schema.tables.find((table) => table.name === TABLE_NAME)
+          if (table) {
+            const info = table.constraints.find((constr) => constr.name === CONSTRAINT_NAME)
+            if (info) {
+              info.update_rule = UPDATE_RULE
+              info.delete_rule = DELETE_RULE
+            }
+          }
+        });
+        return schema
+      })
   }
 }
 

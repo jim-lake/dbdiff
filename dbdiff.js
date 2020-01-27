@@ -54,7 +54,20 @@ class DbDiff {
       if (this._dialect === 'mysql' && !_.isEqual(col1, col2)) {
         var func = (col1.type !== col2.type || (col1.nullable !== col2.nullable && !col2.nullable)) ? this._warn : this._safe
         var extra = col2.extra ? ' ' + col2.extra : ''
-        var comment = col1.type !== col2.type ? `-- Previous data type was ${col1.type}\n` : ''
+
+        let comment = ""
+        if (col1.type !== col2.type) {
+          comment += `-- Previous data type was ${col1.type}\n`
+        }
+        if (col1.extra !== col2.extra) {
+          comment += `-- Previous extra was ${col1.extra}\n`
+        }
+        if (col1.collation_name !== col2.collation_name) {
+          comment += `-- Previous collation_name was ${col1.collation_name}\n`
+        }
+        if (col1.nullable !== col2.nullable) {
+          comment += `-- Previous nullable was ${col1.nullable}\n`
+        }
         func.bind(this)(`${comment}ALTER TABLE ${tableName} MODIFY ${this._quote(columnName)} ${this._columnDescription(col2)}${extra};`)
         return
       }
@@ -195,7 +208,8 @@ class DbDiff {
           func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} UNIQUE (${keys});`)
         } else if (constraint2.type === 'foreign') {
           var foreignKeys = constraint2.referenced_columns.map((s) => `${this._quote(s)}`).join(', ')
-          func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} FOREIGN KEY (${keys}) REFERENCES ${this._quote(constraint2.referenced_table)} (${foreignKeys});`)
+          const { delete_rule, update_rule } = constraint2
+          func(`ALTER TABLE ${tableName} ADD CONSTRAINT ${fullName} FOREIGN KEY (${keys}) REFERENCES ${this._quote(constraint2.referenced_table)} (${foreignKeys}) ON DELETE ${delete_rule} ON UPDATE ${update_rule};`)
         }
       }
     })
@@ -275,6 +289,12 @@ class DbDiff {
       desc += ' DEFAULT ' + col.default_value
     }
     desc += col.nullable ? ' NULL' : ' NOT NULL'
+    if (col.collation_name) {
+      desc += ' COLLATE ' + col.collation_name
+    }
+    if (col.extra) {
+      desc += ' ' + col.extra
+    }
     return desc
   }
 
@@ -331,7 +351,11 @@ function _isMysqlConstraintEqual(c1,c2) {
     s1.referenced_columns.sort();
     s2.columns.sort();
     s2.referenced_columns.sort();
-    return _.isEqual(s1,s2);
+    if (c1.update_rule !== c2.update_rule || c1.delete_rule !== c2.delete_rule) {
+      return false;
+    } else {
+      return _.isEqual(s1,s2);
+    }
   } else {
     return _.isEqual(c1,c2);
   }
